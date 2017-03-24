@@ -1,0 +1,8 @@
+<launch>
+  <!-- pkg: package name, type: node file name, name: exe name -->
+  <node name="rgbd_random_walk" 
+        type="random_walk" 
+        pkg="rgbd_random_walk" 
+        output="screen"/>
+
+</launch>

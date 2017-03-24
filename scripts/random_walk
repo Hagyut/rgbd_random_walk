@@ -1,0 +1,10 @@
+#!/usr/bin/env python
+
+import rospy
+import rgbd_random_walk as rrw
+
+if __name__ == '__main__':
+    rw = rrw.RandomWalk()
+    
+
+    
