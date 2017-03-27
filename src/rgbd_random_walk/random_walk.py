@@ -6,17 +6,9 @@ import math
 import numpy as np
 import random
 import rospy
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, LaserScan
 from threading import Thread
 import time
-
-
-def _abs(x):
-    if x < 0:
-        return -x
-    else:
-        return x
-
 
 class Motion(object):
     
@@ -30,8 +22,8 @@ class Motion(object):
 
     def __init__(self, velo_pub):
         self.velo_pub = velo_pub
-        self.d_blk = False
-        self.o_blk = False
+        self.blk = False
+        self.stucked = False
         self.lock = False
         self.turning = Motion.TURN_NO
         self.vel = Twist()
@@ -42,16 +34,16 @@ class Motion(object):
         self.vel.angular.y = 0
         self.vel.angular.z = 0
         
-    def run(self, d_blk, o_blk):
+    def run(self, blk, stucked):
         self.velo_pub.publish(self.vel)
         if self.lock:
             return
-        if d_blk and not self.d_blk:
+        if blk and not self.blk:
             self.vel.linear.x = - Motion.VEL_LINEAR_X / 3.0
             self.vel.angular.z = 0
-            t = Thread(target=self.lock_thr_func, args=(1,))
+            t = Thread(target=self.lock_thr_func, args=(0.5,))
             t.start()
-        elif d_blk and self.d_blk:
+        elif blk and self.blk:
             if self.turning == Motion.TURN_NO:
                 rn = random.randint(0, 100)
                 if rn % 2 == 0:
@@ -62,9 +54,10 @@ class Motion(object):
                 pass
             self.vel.linear.x = 0
             self.vel.angular.z = self.turning * Motion.VEL_ANGULAR_Z
-            t = Thread(target=self.lock_thr_func, args=(1,))
+            t = Thread(target=self.lock_thr_func, args=(1.0,))
             t.start()
-        elif o_blk:
+        elif stucked:
+            rospy.loginfo("Stucked!")
             rn = random.randint(0, 100)
             if rn % 2 == 0:
                 self.turning = Motion.TURN_LEFT
@@ -72,13 +65,13 @@ class Motion(object):
                 self.turning = Motion.TURN_RIGHT
             self.vel.linear.x = - Motion.VEL_LINEAR_X / 3.0
             self.vel.angular.z = self.turning * Motion.VEL_ANGULAR_Z
-            t = Thread(target=self.lock_thr_func, args=(2,))
+            t = Thread(target=self.lock_thr_func, args=(4.0,))
             t.start()
         else:
             self.vel.linear.x = Motion.VEL_LINEAR_X
             self.vel.angular.z = 0
             self.turning = Motion.TURN_NO
-        self.d_blk = d_blk
+        self.blk = blk
         
 
     def lock_thr_func(self, s_time):
@@ -88,15 +81,17 @@ class Motion(object):
 
 class RandomWalk(object):
 
-    DEPTH_THRESHOLD = 250000000
-    STUCK_THRESHOLD = 1000000
-    STUCK_COUNT = 5
+    BLOCK_COUNT = 20
+    BLOCK_DISTANCE = 0.5
+    ANGLE_START = 300
+    ANGLE_END = 430
+    STUCK_COUNT = int((ANGLE_END - ANGLE_START)*10/100)
+    STUCK_THRES = 0.001
 
     def __init__(self):
         rospy.init_node('random_walk', log_level=rospy.DEBUG, anonymous=True)
-        # Subscriber (depth data from rgbd cam, odom data from turtlebot)
-        self.depth_subsc = None
-        self.odom_subsc = None
+        # Subscriber (distance data from laser scanner)
+        self.laser_subsc = None
         # Publisher (to operate turtlebot)
         self.motor_pub = None
         self.velo_pub = None
@@ -104,20 +99,19 @@ class RandomWalk(object):
         self.dstream_on = False
         self.power_on = False
         # Block flag
-        self.d_blk = False
-        self.o_blk = False
+        self.blk = False
+        self.stucked = False
         # Operation
         self.motion = None
-        # Stuffed 
-        self.prev_arr_sum = long(0)
-        self.stuck_cnt = 0
+        # Stucked 
+        self.prev_laser_data = []
         # Setup function
         self.setup()
 
     def setup(self):
         rospy.loginfo("OCHO turtlebot random walk module initiated.")
         np.set_printoptions(threshold=np.nan)
-        self.depth_subsc = rospy.Subscriber('/camera/depth/image_raw', Image, self.depth_callback)
+        self.laser_subsc = rospy.Subscriber('/scan', LaserScan, self.laser_callback)
         self.velo_pub = rospy.Publisher('/mobile_base/commands/velocity', Twist, queue_size=1)
         self.motor_pub = rospy.Publisher('/mobile_base/commands/motor_power', MotorPower, queue_size=1)
         self.motion = Motion(self.velo_pub)
@@ -130,9 +124,9 @@ class RandomWalk(object):
 
     def spin(self):
         while not rospy.is_shutdown():
-            if self.depth_subsc.get_num_connections() < 1:
+            if self.laser_subsc.get_num_connections() < 1:
                 self.dstream_on = False
-                rospy.logwarn('Subscriber for depth image not working.')
+                rospy.logwarn('Subscriber for laser scan not working.')
             else:
                 self.dstream_on = True
             
@@ -140,28 +134,42 @@ class RandomWalk(object):
                 self.turn_on_motor(True)
             else:
                 pass
-            self.motion.run(self.d_blk, self.o_blk)
-            rospy.sleep(rospy.Duration(0, nsecs=10000))
-
-    def depth_callback(self, image_data):
-        # image width   : 640
-        # image height  : 480
-        np_arr = np.fromstring(image_data.data, np.uint16)
-        arr_sum = long(np.sum(np_arr))
-        
-        if arr_sum < RandomWalk.DEPTH_THRESHOLD:
-            self.d_blk = True
+            self.motion.run(self.blk, self.stucked)
+            rospy.sleep(rospy.Duration(0, nsecs=100000))
+    
+    def laser_callback(self, laser_data):
+        blk_count = 0
+        stuck_count = 0
+        data = np.array(laser_data.ranges[RandomWalk.ANGLE_START:RandomWalk.ANGLE_END], copy=True)
+        data_len = data.size
+        prev_data_len = len(self.prev_laser_data)
+        for i in range(0, data_len):
+            if not math.isnan(data[i]) and data[i] < RandomWalk.BLOCK_DISTANCE:
+                blk_count += 1
+        if blk_count > RandomWalk.BLOCK_COUNT:
+            self.blk = True
         else:
-            self.d_blk = False
-        if _abs(arr_sum - self.prev_arr_sum) < RandomWalk.STUCK_THRESHOLD:
-            self.stuck_cnt = self.stuck_cnt + 1
+            self.blk = False
+        # rospy.loginfo("###")
+        # rospy.loginfo(len(self.prev_laser_data))
+        # rospy.loginfo(data.size)
+        # rospy.loginfo(self.prev_laser_data)
+        # rospy.loginfo(data)
+        # rospy.loginfo("###")
+        if prev_data_len > 0:
+            if prev_data_len != data_len:
+                pass
+            else:
+                for i in range(0, data_len):
+                    if math.fabs(data[i] - self.prev_laser_data[i]) < RandomWalk.STUCK_THRES:
+                        stuck_count += 1
+                        
+        # rospy.loginfo(stuck_count)
+        if stuck_count > RandomWalk.STUCK_COUNT:
+            self.stucked = True
         else:
-            self.stuck_cnt = 0
-        if self.stuck_cnt > RandomWalk.STUCK_COUNT:
-            self.o_blk = True
-        else:
-            self.o_blk = False
-        self.prev_arr_sum = arr_sum
+            self.stucked = False
+        self.prev_laser_data = np.copy(data)
 
     def turn_on_motor(self, on):
         mp = MotorPower()
@@ -175,6 +183,7 @@ class RandomWalk(object):
     def ros_shutdown(self):
         ## Power Off
         self.turn_on_motor(False)
+        self.laser_subsc.unregister()
         self.motor_pub.unregister()
         self.velo_pub.unregister()
         rospy.loginfo("Shutdown random_walk node.")
