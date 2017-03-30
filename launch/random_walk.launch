@@ -1,8 +1,10 @@
 <launch>
-  <!-- pkg: package name, type: node file name, name: exe name -->
-  <node name="rgbd_random_walk" 
-        type="random_walk" 
-        pkg="rgbd_random_walk" 
-        output="screen"/>
+  <param name="tbot2/lin_x_vel" type="double" value="0.3"/>
+  <param name="tbot2/ang_z_vel" type="double" value="0.6"/>
+  <param name="tbot2/blk_dist" type="double" value="0.5"/>
+  <param name="tbot2/laser_angle_start" type="int" value="300"/>
+  <param name="tbot2/laser_angle_end" type="int" value="430"/>
+  
+  <node name="tbot2_laser_rw" type="random_walk" pkg="tbot2_laser_rw" output="screen"/>
 
 </launch>

@@ -1,10 +1,11 @@
 <?xml version="1.0"?>
 <package>
-  <name>rgbd_random_walk</name>
-  <version>0.0.0</version>
-  <description>The rgbd_random_walk package</description>
+  <name>tbot2_laser_rw</name>
+  <version>1.0.0</version>
+  <description>Package for turtlebot2 random walk using laser scanner</description>
 
-  <maintainer email="gted@openchoice.co.kr">gted</maintainer>
+  <maintainer email="hagyut@gmail.com">GTED</maintainer>
+  <author email="hagyut@gmail.com">GTED</author>
 
   <license>BSD</license>
   <buildtool_depend>catkin</buildtool_depend>
