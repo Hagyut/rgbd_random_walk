@@ -38,7 +38,6 @@ class Motion(object):
     def setVeloParams(self):
         vel_lin_x = rospy.get_param("tbot2/lin_x_vel")
         vel_ang_z = rospy.get_param("tbot2/ang_z_vel")
-        rospy.loginfo(vel_lin_x)
         if not vel_lin_x is None:
             Motion.VEL_LINEAR_X = vel_lin_x
         if not vel_ang_z is None:
@@ -67,7 +66,7 @@ class Motion(object):
             t = Thread(target=self.lock_thr_func, args=(1.0,))
             t.start()
         elif stucked:
-            rospy.loginfo("Stucked!")
+            rospy.loginfo("Stucked.")
             rn = random.randint(0, 100)
             if rn % 2 == 0:
                 self.turning = Motion.TURN_LEFT
@@ -99,7 +98,7 @@ class RandomWalk(object):
     STUCK_THRES = 0.001
 
     def __init__(self):
-        rospy.init_node('random_walk', log_level=rospy.DEBUG, anonymous=True)
+        rospy.init_node('random_walk', log_level=rospy.INFO, anonymous=True)
         # Subscriber (distance data from laser scanner)
         self.laser_subsc = None
         # Publisher (to operate turtlebot)
